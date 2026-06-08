@@ -1,0 +1,6 @@
+{
+  "name": "Validador de Metas SMART",
+  "description": "Validador inteligente de metas SMART e performance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
