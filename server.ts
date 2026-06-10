@@ -9,16 +9,6 @@ dotenv.config();
 async function startServer() {
   const app = express();
   app.use(express.json());
-
-  // Desativa cache agressivo para evitar travamento em proxies corporativos ou necessidade de excluir cookies/cache reincidentes
-  app.use((req, res, next) => {
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.setHeader("Surrogate-Control", "no-store");
-    next();
-  });
-
   const PORT = 3000;
 
   // Lazy check and fallback for GEMINI_API_KEY

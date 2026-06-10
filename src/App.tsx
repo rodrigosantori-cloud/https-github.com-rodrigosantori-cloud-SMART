@@ -21,130 +21,6 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { SMARTGoalInput, SMARTResult } from "./types";
 
-// Função helper para chamar a API REST do Gemini diretamente do navegador (para execução estática no GitHub Pages)
-const callGeminiDirectly = async (apiKey: string, prompt: string, schema: any, systemInstruction: string) => {
-  // Tentamos com o modelo gemini-2.5-flash ou similar
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: schema
-      },
-      systemInstruction: {
-        parts: [{ text: systemInstruction }]
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    let msg = `Erro HTTP ${response.status}`;
-    try {
-      const parsed = JSON.parse(errText);
-      if (parsed.error?.message) {
-        msg = parsed.error.message;
-      }
-    } catch (_) {}
-    throw new Error(msg);
-  }
-
-  const resData = await response.json();
-  const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error("A Inteligência Artificial retornou uma resposta vazia.");
-  }
-  return JSON.parse(text.trim());
-};
-
-const clientProposeResponseSchema = {
-  type: "object",
-  properties: {
-    s: { type: "string" },
-    m: { type: "string" },
-    a: { type: "string" },
-    r: { type: "string" },
-    t: { type: "string" }
-  },
-  required: ["s", "m", "a", "r", "t"]
-};
-
-const clientSmartResponseSchema = {
-  type: "object",
-  properties: {
-    adherencePercentage: { type: "integer" },
-    overallVerdict: { type: "string" },
-    criteria: {
-      type: "object",
-      properties: {
-        S: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            rating: { type: "string" },
-            score: { type: "integer" },
-            analysis: { type: "string" },
-            suggestions: { type: "string" }
-          },
-          required: ["name", "rating", "score", "analysis", "suggestions"]
-        },
-        M: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            rating: { type: "string" },
-            score: { type: "integer" },
-            analysis: { type: "string" },
-            suggestions: { type: "string" }
-          },
-          required: ["name", "rating", "score", "analysis", "suggestions"]
-        },
-        A: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            rating: { type: "string" },
-            score: { type: "integer" },
-            analysis: { type: "string" },
-            suggestions: { type: "string" }
-          },
-          required: ["name", "rating", "score", "analysis", "suggestions"]
-        },
-        R: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            rating: { type: "string" },
-            score: { type: "integer" },
-            analysis: { type: "string" },
-            suggestions: { type: "string" }
-          },
-          required: ["name", "rating", "score", "analysis", "suggestions"]
-        },
-        T: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            rating: { type: "string" },
-            score: { type: "integer" },
-            analysis: { type: "string" },
-            suggestions: { type: "string" }
-          },
-          required: ["name", "rating", "score", "analysis", "suggestions"]
-        }
-      },
-      required: ["S", "M", "A", "R", "T"]
-    },
-    refinedGoal: { type: "string" }
-  },
-  required: ["adherencePercentage", "overallVerdict", "criteria", "refinedGoal"]
-};
-
 // Definido fora do componente para máxima performance (estático, evita recriações)
 const getScoreColor = (percent: number) => {
   if (percent >= 80) return { text: "text-crf-blue", bg: "bg-crf-blue-light", border: "border-crf-blue-light", stroke: "#003896" };
@@ -172,8 +48,6 @@ export default function App() {
   const [proposing, setProposing] = useState(false);
   const [proposingProgress, setProposingProgress] = useState(0);
   const [proposingStepMsg, setProposingStepMsg] = useState("");
-  const [clientApiKey, setClientApiKey] = useState(() => localStorage.getItem("gemini_client_api_key") || "");
-  const [showKeyField, setShowKeyField] = useState(false);
 
   // Controla progresso simulado visual durante a análise da IA
   useEffect(() => {
@@ -289,7 +163,7 @@ export default function App() {
     window.history.pushState({}, document.title, window.location.pathname);
   }, []);
 
-  // Chamar API de Validação no Backend ou Fallback do Cliente (otimizado com useCallback)
+  // Chamar API de Validação no Backend (otimizado com useCallback)
   const handleValidate = useCallback(async () => {
     if (!inputs.goal.trim()) {
       setError("Por favor, preencha pelo menos o resumo ou objetivo da Meta Geral no início do formulário.");
@@ -301,63 +175,18 @@ export default function App() {
     setResult(null);
 
     try {
-      let data;
-      let usedClientFallback = false;
+      const response = await fetch("/api/validate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(inputs)
+      });
 
-      // Se o usuário configurou uma chave cliente no navegador, priorizamos o uso dela
-      if (clientApiKey) {
-        try {
-          const promptTemplate = `
-          Você é um especialista em desenvolvimento organizacional que avalia metas profissionais e pessoais usando a metodologia SMART (Specific, Measurable, Ambitious, Relevant, Time-bound), onde 'A' significa Ambiciosa e viável.
-          
-          Avalie a meta geral descrita: "${inputs.goal}"
-          
-          O usuário forneceu os seguintes detalhes sobre cada uma das dimensões:
-          - S (Específica): "${inputs.s ? inputs.s.trim() : "Não preenchido / Não fornecido pelo usuário"}"
-          - M (Mensurável): "${inputs.m ? inputs.m.trim() : "Não preenchido / Não fornecido pelo usuário"}"
-          - A (Ambiciosa): "${inputs.a ? inputs.a.trim() : "Não preenchido / Não fornecido pelo usuário"}"
-          - R (Relevante): "${inputs.r ? inputs.r.trim() : "Não preenchido / Não fornecido pelo usuário"}"
-          - T (Temporal): "${inputs.t ? inputs.t.trim() : "Não preenchido / Não fornecido pelo usuário"}"
+      const data = await response.json();
 
-          REGRAS DE AVALIAÇÃO:
-          1. Se o usuário deixou algum campo em branco ou escreveu coisas sem nexo, atribua um score muito baixo para aquela dimensão (ex: de 0 a 15) e, na análise e sugestões, explique gentilmente o que está faltando e mostre como preencher de maneira correta baseado no contexto da meta.
-          2. Calcule uma média geral ponderada de aderência (adherencePercentage) entre 0 e 100.
-          3. Forneça análises de alto nível e propostas acionáveis de melhora para cada letra da sigla.
-          4. Escreva a "refinedGoal": uma versão perfeitamente unificada da meta em uma única frase poderosa, detalhada, e de fácil leitura, que atenda a 100% dos quesitos SMART de forma exemplar.
-          `;
-          const sysIns = "Aja como um mentor corporativo brilhante e motivador especialista em Metas SMART & OKRs. O 'A' deve ser avaliado no sentido de 'Ambiciosa' (Ambitious), isto é, desafiadora mas realista. Escreva feedbacks refinados, inspiradores, construtivos e 100% em português do Brasil.";
-          data = await callGeminiDirectly(clientApiKey, promptTemplate, clientSmartResponseSchema, sysIns);
-          usedClientFallback = true;
-        } catch (clientErr: any) {
-          throw new Error(`Falha ao rodar com a Chave de API direta: ${clientErr.message}`);
-        }
-      }
-
-      if (!usedClientFallback) {
-        try {
-          const response = await fetch("/api/validate", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(inputs)
-          });
-
-          if (response.status === 404) {
-            throw new Error("STATIC_PAGES_BACKEND_404");
-          }
-
-          data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(data.error || "Ocorreu um erro desconhecido na comunicação com a Inteligência Artificial.");
-          }
-        } catch (backendErr: any) {
-          if (backendErr.message === "STATIC_PAGES_BACKEND_404" || backendErr.message?.includes("Failed to fetch")) {
-            throw new Error("Esta página está rodando de forma estática no GitHub Pages (sem servidor backend ativo). Por favor, clique no botão 'Chave de API' no topo para configurar a sua chave pessoal do Gemini gratuitamente!");
-          }
-          throw backendErr;
-        }
+      if (!response.ok) {
+        throw new Error(data.error || "Ocorreu um erro desconhecido na comunicação com a Inteligência Artificial.");
       }
 
       setResult(data);
@@ -374,7 +203,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [inputs, clientApiKey]);
+  }, [inputs]);
 
   // Copiar a meta unificada refinada (otimizado com useCallback)
   const copyToClipboard = useCallback((text: string) => {
@@ -407,61 +236,21 @@ export default function App() {
     setError(null);
 
     try {
-      let data;
-      let usedClientFallback = false;
+      const response = await fetch("/api/propose-criteria", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ goal: inputs.goal })
+      });
 
-      if (clientApiKey) {
-        try {
-          const promptTemplate = `
-          Você é um mentor especialista em Metas SMART & OKRs para o Carrefour DHO.
-          Com base na seguinte meta resumida / ideia geral fornecida pelo usuário:
-          "${inputs.goal}"
+      const data = await response.json();
 
-          Proponha frases estruturadas, inspiradoras e profissionais para preencher cada caixinha do método SMART:
-          - S (Específica): Um detalhamento claro e específico de o que será realizado.
-          - M (Mensurável): Como medir ou quantificar o sucesso dessa meta de forma realista.
-          - A (Ambiciosa): Como essa meta é desafiadora, instigante e ambiciosa, mas ainda viável.
-          - R (Relevante): Qual a relevância e impacto dessa meta para o indivíduo ou organização.
-          - T (Temporal): Um prazo lógico ou cronograma adequado para esta meta.
-
-          Escreva propostas curtas (uma única frase clara e direta para cada pilar), acionáveis, e diretamente preenchíveis nos inputs, em português do Brasil, voltadas para o ambiente corporativo e de desenvolvimento de alta performance.
-          `;
-          const sysIns = "Aja como um mentor corporativo excelente no Carrefour DHO. Forneça propostas de preenchimento de uma única frase direta para cada pilar do SMART, 150% em português do Brasil, de forma inspiradora e profissional.";
-          data = await callGeminiDirectly(clientApiKey, promptTemplate, clientProposeResponseSchema, sysIns);
-          usedClientFallback = true;
-        } catch (clientErr: any) {
-          throw new Error(`Falha ao propor com a Chave de API direta: ${clientErr.message}`);
-        }
-      }
-
-      if (!usedClientFallback) {
-        try {
-          const response = await fetch("/api/propose-criteria", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ goal: inputs.goal })
-          });
-
-          if (response.status === 404) {
-            throw new Error("STATIC_PAGES_BACKEND_404");
-          }
-
-          data = await response.json();
-
-          if (!response.ok) {
-            const errorMsg = data.details 
-              ? `${data.error} (Motivo: ${data.details})` 
-              : (data.error || "Ocorreu um erro ao gerar propostas para os critérios SMART.");
-            throw new Error(errorMsg);
-          }
-        } catch (backendErr: any) {
-          if (backendErr.message === "STATIC_PAGES_BACKEND_404" || backendErr.message?.includes("Failed to fetch")) {
-            throw new Error("Este site está rodando estaticamente no GitHub Pages. Configure uma chave do Gemini no botão 'Chave de API' no topo para habilitar a geração automática!");
-          }
-          throw backendErr;
-        }
+      if (!response.ok) {
+        const errorMsg = data.details 
+          ? `${data.error} (Motivo: ${data.details})` 
+          : (data.error || "Ocorreu um erro ao gerar propostas para os critérios SMART.");
+        throw new Error(errorMsg);
       }
 
       setInputs(prev => ({
@@ -478,7 +267,7 @@ export default function App() {
     } finally {
       setProposing(false);
     }
-  }, [inputs.goal, clientApiKey]);
+  }, [inputs.goal]);
 
   // Exportar relatório em formato de texto para DHO (otimizado com useCallback)
   const handleExportTxt = useCallback(() => {
@@ -578,87 +367,18 @@ Metodologia SMART • Carrefour Desenvolvimento Humano e Organizacional (DHO)
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowKeyField(!showKeyField)}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-                clientApiKey 
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60 hover:bg-emerald-100" 
-                  : "bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200"
-              }`}
-              title="Configurar chave do Gemini para rodar estaticamente"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              {clientApiKey ? "Gemini Direct: Ativo" : "Chave de API / GitHub Pages"}
-            </button>
-
-            <div className="flex items-center gap-1.5 bg-slate-105 p-1 rounded-lg">
-              {["S", "M", "A", "R", "T"].map((letter, idx) => {
-                const bgClass = idx % 2 === 0 ? "text-crf-blue" : "text-crf-red";
-                return (
-                  <span key={letter} className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold font-mono bg-white shadow-xs ${bgClass}`}>
-                    {letter}
-                  </span>
-                );
-              })}
-            </div>
+          <div className="flex items-center gap-1.5 bg-slate-105 p-1 rounded-lg">
+            {["S", "M", "A", "R", "T"].map((letter, idx) => {
+              const bgClass = idx % 2 === 0 ? "text-crf-blue" : "text-crf-red";
+              return (
+                <span key={letter} className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold font-mono bg-white shadow-xs ${bgClass}`}>
+                  {letter}
+                </span>
+              );
+            })}
           </div>
         </div>
       </header>
-
-      {/* Painel Configurador de Chave de API Cliente (Para rodar estático no GitHub Pages) */}
-      <AnimatePresence>
-        {showKeyField && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="bg-slate-100 border-b border-slate-200 overflow-hidden print:hidden"
-          >
-            <div className="max-w-4xl mx-auto px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs">
-              <div className="space-y-1">
-                <p className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  Configurar Chave do Gemini (Execução Direta / GitHub Pages)
-                </p>
-                <p className="text-slate-500 text-[11px] leading-relaxed max-w-xl">
-                  Se você estiver acessando este site de forma estática no GitHub Pages (onde o servidor não está ativo),
-                  insira sua chave pessoal gratuita do Gemini abaixo para habilitar a geração e análise das metas.
-                  Sua chave ficará guardada de forma segura na memória privada do seu próprio navegador.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 w-full md:w-auto">
-                <input
-                  type="password"
-                  placeholder="Cole sua API Key do Gemini aqui..."
-                  value={clientApiKey}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setClientApiKey(val);
-                    if (val) {
-                      localStorage.setItem("gemini_client_api_key", val.trim());
-                    } else {
-                      localStorage.removeItem("gemini_client_api_key");
-                    }
-                  }}
-                  className="w-full md:w-72 px-3 py-1.5 rounded-lg border border-slate-300 focus:outline-hidden focus:border-crf-blue bg-white font-mono text-[11px]"
-                />
-                {clientApiKey && (
-                  <button
-                    onClick={() => {
-                      setClientApiKey("");
-                      localStorage.removeItem("gemini_client_api_key");
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-semibold transition-colors cursor-pointer"
-                  >
-                    Remover
-                  </button>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Container Principal */}
       <main className="max-w-4xl mx-auto px-4 mt-8 relative z-20 print:mt-2">
