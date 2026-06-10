@@ -46,6 +46,43 @@ export default function App() {
   const [copiedText, setCopiedText] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [proposing, setProposing] = useState(false);
+  const [proposingProgress, setProposingProgress] = useState(0);
+  const [proposingStepMsg, setProposingStepMsg] = useState("");
+
+  // Controla progresso simulado visual durante a análise da IA
+  useEffect(() => {
+    let timer: any = null;
+    if (proposing) {
+      setProposingProgress(12);
+      setProposingStepMsg("Iniciando mentoria de DHO com Inteligência Artificial...");
+      
+      timer = setInterval(() => {
+        setProposingProgress((prev) => {
+          if (prev >= 92) return prev;
+          const increment = Math.floor(Math.random() * 12) + 6;
+          const next = prev + increment;
+          
+          if (next < 35) {
+            setProposingStepMsg("Identificando a essência da sua meta e refinando...");
+          } else if (next < 55) {
+            setProposingStepMsg("Injetando parâmetros Específicos (S) e Mensuráveis (M)...");
+          } else if (next < 75) {
+            setProposingStepMsg("Calibrando o desafio sob a ótica Ambiciosa (A) e Relevante (R)...");
+          } else {
+            setProposingStepMsg("Estruturando prazos ideais no quadrante Temporal (T)...");
+          }
+          
+          return Math.min(next, 92);
+        });
+      }, 500);
+    } else {
+      setProposingProgress(0);
+      setProposingStepMsg("");
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [proposing]);
 
   // Carregar dados da URL caso existam (compartilhamento ou impressão)
   useEffect(() => {
@@ -426,6 +463,27 @@ Metodologia SMART • Carrefour Desenvolvimento Humano e Organizacional (DHO)
                   )}
                 </button>
               </div>
+
+              {proposing && (
+                <div className="mt-4 p-3.5 bg-white border border-slate-100 rounded-lg shadow-2xs space-y-2 animate-pulse">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-black text-crf-blue flex items-center gap-2">
+                      <svg className="animate-spin h-3 w-3 text-crf-blue inline" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      {proposingStepMsg}
+                    </span>
+                    <span className="text-xs font-extrabold text-slate-500">{proposingProgress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-crf-blue to-crf-blue/80 transition-all duration-500 rounded-full"
+                      style={{ width: `${proposingProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-4 pt-2">
