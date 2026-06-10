@@ -45,8 +45,8 @@ export default function App() {
   const [result, setResult] = useState<SMARTResult | null>(null);
   const [copiedText, setCopiedText] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [proposing, setProposing] = useState(false);
 
-  // Carregar dados da URL caso existam (compartilhamento)
   // Carregar dados da URL caso existam (compartilhamento ou impressão)
   useEffect(() => {
     try {
@@ -86,9 +86,17 @@ export default function App() {
             t: decoded.t || ""
           });
         }
+
+        // Remove the query parameters smoothly so reloading doesn't trap users in the old loaded state
+        const cleanerUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanerUrl);
       }
     } catch (e) {
       console.warn("Não foi possível decodificar os parâmetros compartilhados.", e);
+      // Limpeza de contingência em caso de travamentos causados por proxies corporativos modificando loops de URL
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (_) {}
     }
   }, []);
 
@@ -180,6 +188,50 @@ export default function App() {
     }
   }, [inputs]);
 
+  // Chamar API de Propor Critérios automáticos via IA (otimizado com useCallback)
+  const handleProposeCriteria = useCallback(async () => {
+    if (!inputs.goal.trim()) {
+      setError("Por favor, preencha primeiro a sua Meta Resumida ou Ideia Geral para que a IA possa propor as caixinhas SMART.");
+      return;
+    }
+
+    setProposing(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/propose-criteria", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ goal: inputs.goal })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMsg = data.details 
+          ? `${data.error} (Motivo: ${data.details})` 
+          : (data.error || "Ocorreu um erro ao gerar propostas para os critérios SMART.");
+        throw new Error(errorMsg);
+      }
+
+      setInputs(prev => ({
+        ...prev,
+        s: data.s || prev.s,
+        m: data.m || prev.m,
+        a: data.a || prev.a,
+        r: data.r || prev.r,
+        t: data.t || prev.t
+      }));
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Erro de rede ao conectar com a IA para propor critérios.");
+    } finally {
+      setProposing(false);
+    }
+  }, [inputs.goal]);
+
   // Exportar relatório em formato de texto para DHO (otimizado com useCallback)
   const handleExportTxt = useCallback(() => {
     if (!result) return;
@@ -188,7 +240,7 @@ VALIDADOR DE METAS SMART - CARREFOUR DHO
 RELATÓRIO DE DIAGNÓSTICO E PERFORMANCE DE META
 ====================================================
 
-Meta Original (Rascunho):
+Meta Geral (Rascunho):
 "${inputs.goal}"
 
 SÍNTESE REFORMULADA (A SUA META SMART IDEAL):
@@ -200,37 +252,45 @@ Aderência Metodológica: ${result.adherencePercentage}%
 Parecer: ${result.overallVerdict}
 ----------------------------------------------------
 
-DIAGNÓSTICO DETALHADO POR CRITÉRIO:
+COMPARAÇÃO DETALHADA E RECOMENDAÇÕES DA FERRAMENTA:
 
 S - Específica / Specific (Nota: ${result.criteria.S.score}/100 - ${result.criteria.S.rating})
-- O que diz o avaliador:
-  ${result.criteria.S.analysis}
-- Sugestão de Ajuste:
+- Meta preenchida na caixinha:
+  "${inputs.s || "(Não preenchido)"}"
+- Nova sugestão dada pela ferramenta:
   ${result.criteria.S.suggestions}
 
 M - Mensurável / Measurable (Nota: ${result.criteria.M.score}/100 - ${result.criteria.M.rating})
-- O que diz o avaliador:
-  ${result.criteria.M.analysis}
-- Sugestão de Ajuste:
+- Meta preenchida na caixinha:
+  "${inputs.m || "(Não preenchido)"}"
+- Nova sugestão dada pela ferramenta:
   ${result.criteria.M.suggestions}
 
-A - Atingível / Achievable (Nota: ${result.criteria.A.score}/100 - ${result.criteria.A.rating})
-- O que diz o avaliador:
-  ${result.criteria.A.analysis}
-- Sugestão de Ajuste:
+A - Ambiciosa / Ambitious (Nota: ${result.criteria.A.score}/100 - ${result.criteria.A.rating})
+- Meta preenchida na caixinha:
+  "${inputs.a || "(Não preenchido)"}"
+- Nova sugestão dada pela ferramenta:
   ${result.criteria.A.suggestions}
 
 R - Relevante / Relevant (Nota: ${result.criteria.R.score}/100 - ${result.criteria.R.rating})
-- O que diz o avaliador:
-  ${result.criteria.R.analysis}
-- Sugestão de Ajuste:
+- Meta preenchida na caixinha:
+  "${inputs.r || "(Não preenchido)"}"
+- Nova sugestão dada pela ferramenta:
   ${result.criteria.R.suggestions}
 
 T - Temporal / Time-bound (Nota: ${result.criteria.T.score}/100 - ${result.criteria.T.rating})
-- O que diz o avaliador:
-  ${result.criteria.T.analysis}
-- Sugestão de Ajuste:
+- Meta preenchida na caixinha:
+  "${inputs.t || "(Não preenchido)"}"
+- Nova sugestão dada pela ferramenta:
   ${result.criteria.T.suggestions}
+
+----------------------------------------------------
+AVALIAÇÃO ANALÍTICA DO MENTOR SOBRE CADA CRITÉRIO:
+- S (Específica): ${result.criteria.S.analysis}
+- M (Mensurável): ${result.criteria.M.analysis}
+- A (Ambiciosa): ${result.criteria.A.analysis}
+- R (Relevante): ${result.criteria.R.analysis}
+- T (Temporal): ${result.criteria.T.analysis}
 
 ----------------------------------------------------
 Relatório gerado em: ${new Date().toLocaleDateString("pt-BR")} às ${new Date().toLocaleTimeString("pt-BR")}
@@ -339,9 +399,33 @@ Metodologia SMART • Carrefour Desenvolvimento Humano e Organizacional (DHO)
                 rows={2}
                 className="w-full text-slate-800 bg-white placeholder-slate-400 border border-slate-200 rounded-lg py-2.5 px-3.5 text-sm focus:outline-hidden focus:border-crf-blue focus:ring-1 focus:ring-crf-blue transition-all font-medium"
               ></textarea>
-              <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
-                Essa é a sua meta antes do alinhamento. A seguir, vamos destrinchar cada detalhe metodológico.
-              </p>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-crf-blue/10">
+                <p className="text-[11px] text-slate-500 leading-relaxed max-w-sm">
+                  Essa é a sua meta antes do alinhamento. Toque à direita para sugerir o preenchimento de cada critério por IA!
+                </p>
+                <button
+                  type="button"
+                  onClick={handleProposeCriteria}
+                  disabled={proposing || !inputs.goal.trim()}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-crf-blue text-white hover:bg-crf-blue-hover disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-xs font-black transition-all shadow-xs active:scale-[0.98] cursor-pointer"
+                  id="propose_criteria_button"
+                >
+                  {proposing ? (
+                    <>
+                      <svg className="animate-spin h-3.5 w-3.5 text-current inline" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Gerando proposta...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Fazer analise SMART
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-4 pt-2">
@@ -392,23 +476,23 @@ Metodologia SMART • Carrefour Desenvolvimento Humano e Organizacional (DHO)
                 />
               </div>
 
-              {/* A - Atingível */}
+              {/* A - Ambiciosa */}
               <div className="group relative border border-slate-150 rounded-xl p-4 hover:border-crf-blue/30 hover:bg-slate-50/30 transition-all">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <div className="flex items-center gap-2">
                     <span className="w-7 h-7 rounded-lg bg-crf-blue-light text-crf-blue flex items-center justify-center font-bold font-mono text-base">A</span>
                     <label className="text-sm font-bold text-slate-800" htmlFor="a_field">
-                      Achievable (Atingível)
+                      Ambitious (Ambiciosa)
                     </label>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-medium">É realista dadas as suas circunstâncias?</span>
+                  <span className="text-[10px] text-slate-500 font-medium font-semibold text-rose-600">A meta te desafia de forma ambiciosa, embora factível?</span>
                 </div>
                 <input
                   id="a_field"
                   type="text"
                   value={inputs.a}
                   onChange={(e) => handleInputChange("a", e.target.value)}
-                  placeholder="Quais ações, recursos, dinheiro, conhecimento ou equipe você já possui?"
+                  placeholder="Como essa meta representa um desafio instigante e ambicioso para você ou para a organização?"
                   className="w-full bg-white text-slate-800 placeholder-slate-400 border border-slate-200 rounded-lg py-2 px-3 text-sm focus:outline-hidden focus:border-crf-blue transition-all"
                 />
               </div>
@@ -665,7 +749,7 @@ Metodologia SMART • Carrefour Desenvolvimento Humano e Organizacional (DHO)
                   {[
                     { key: "S", letter: "S", icon: Target, name: "Específica / Specific", color: "sky", details: result.criteria.S },
                     { key: "M", letter: "M", icon: BarChart3, name: "Mensurável / Measurable", color: "emerald", details: result.criteria.M },
-                    { key: "A", letter: "A", icon: Award, name: "Atingível / Achievable", color: "violet", details: result.criteria.A },
+                    { key: "A", letter: "A", icon: Award, name: "Ambiciosa / Ambitious", color: "violet", details: result.criteria.A },
                     { key: "R", letter: "R", icon: Compass, name: "Relevante / Relevant", color: "amber", details: result.criteria.R },
                     { key: "T", letter: "T", icon: Calendar, name: "Temporal / Time-bound", color: "rose", details: result.criteria.T }
                   ].map((crit) => {
